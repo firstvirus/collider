@@ -1,27 +1,23 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using System;
+using Newtonsoft.Json;
+using NpgsqlTypes;
+using Npgsql;
 using UserAnalyticsAPI.Domain.Data.Models;
 
 namespace UserAnalyticsAPI.Domain.Data.Seeders;
 
-public class DbSeeder
+public class DbSeeder(MainDbContext mainDbContext)
 {
-    private readonly MainDbContext _mainDbContext;
-    private static readonly Random _random = new();
-    private static readonly string[] _eventNames = { "login", "logout", "cart", "view", "search", "checkout" };
-    private static readonly string[] _firstNames = { "John", "Alice", "Bob", "Emma", "Michael", "Izya" };
-    private static readonly string[] _lastNames = { "Smith", "Johnson", "Brown", "Davis", "Wilson" };
-
-    public DbSeeder(MainDbContext mainDbContext)
-    {
-        _mainDbContext = mainDbContext;
-    }
+    private static readonly Random Random = new();
+    private static readonly string[] EventNames = ["login", "logout", "cart", "view", "search", "checkout"];
+    private static readonly string[] FirstNames = ["John", "Alice", "Bob", "Emma", "Michael", "Izya"];
+    private static readonly string[] LastNames = ["Smith", "Johnson", "Brown", "Davis", "Wilson"];
 
     public async Task SeedAsync()
     {
-        await SeedUsers(_mainDbContext);
-        await SeedEventTypes(_mainDbContext);
-        await SeedEvents(_mainDbContext);
+        await SeedUsers(mainDbContext);
+        await SeedEventTypes(mainDbContext);
+        await SeedEvents(mainDbContext);
     }
 
     private static async Task SeedUsers(MainDbContext context)
@@ -34,8 +30,8 @@ public class DbSeeder
             users.Add(new User
             {
                 Id = Guid.NewGuid(),
-                Name = $"{_firstNames[_random.Next(_firstNames.Length)]} {_lastNames[_random.Next(_lastNames.Length)]}",
-                CreatedAt = DateTime.UtcNow.AddDays(-_random.Next(1, 365))
+                Name = $"{FirstNames[Random.Next(FirstNames.Length)]} {LastNames[Random.Next(LastNames.Length)]}",
+                CreatedAt = DateTime.UtcNow.AddDays(-Random.Next(1, 365))
             });
         }
 
@@ -47,7 +43,7 @@ public class DbSeeder
     {
         if (await context.EventTypes.AnyAsync()) return;
 
-        var eventTypes = _eventNames.Select((name, index) => new EventType
+        var eventTypes = EventNames.Select((name, index) => new EventType
         {
             Id = index + 1,
             Name = name
@@ -67,39 +63,63 @@ public class DbSeeder
 
         for (int i = 0; i < 10000000; i++)
         {
-            var user = users[_random.Next(users.Count)];
-            var eventType = eventTypes[_random.Next(eventTypes.Count)];
+            var user = users[Random.Next(users.Count)];
+            var eventType = eventTypes[Random.Next(eventTypes.Count)];
 
             events.Add(new Event
             {
                 UserId = user.Id,
                 TypeId = eventType.Id,
-                Timestamp = DateTime.UtcNow.AddMinutes(-_random.Next(1, 10080)), // До 7 дней назад
+                Timestamp = DateTime.UtcNow.AddMinutes(-Random.Next(1, 10080)), // До 7 дней назад
                 Metadata = GenerateRandomMetadata(eventType.Name)
             });
         }
 
-        await context.Events.AddRangeAsync(events);
-        await context.SaveChangesAsync();
+        await context.Database.ExecuteSqlRawAsync("ALTER TABLE events SET UNLOGGED");
+        await context.Database.ExecuteSqlRawAsync("DROP INDEX ix_events_user_id");
+        
+        var npgsqlConnection = (NpgsqlConnection)context.Database.GetDbConnection();
+
+        if (npgsqlConnection.State != System.Data.ConnectionState.Open)
+            await npgsqlConnection.OpenAsync();
+
+
+        await using var writer = await npgsqlConnection.BeginBinaryImportAsync(
+            "COPY events (user_id, type_id, timestamp, metadata) FROM STDIN (FORMAT BINARY)");
+
+        foreach (var e in events)
+        {
+            await writer.StartRowAsync();
+            await writer.WriteAsync(e.UserId);
+            await writer.WriteAsync(e.TypeId);
+            await writer.WriteAsync(e.Timestamp);
+            await writer.WriteAsync(JsonConvert.SerializeObject(e.Metadata), NpgsqlDbType.Jsonb);
+        }
+
+        await writer.CompleteAsync();
+        await writer.DisposeAsync();
+
+        await context.Database.ExecuteSqlRawAsync("CREATE INDEX CONCURRENTLY ix_events_user_id ON events(user_id)");
+        await context.Database.ExecuteSqlRawAsync("ALTER TABLE events SET LOGGED");
     }
 
     private static Dictionary<string, object> GenerateRandomMetadata(string eventType)
     {
         var metadata = new Dictionary<string, object>
         {
-            ["ip"] = $"{_random.Next(1, 255)}.{_random.Next(0, 255)}.{_random.Next(0, 255)}.{_random.Next(0, 255)}",
-            ["userAgent"] = _random.NextDouble() > 0.5 ? "Chrome" : "Firefox",
+            ["ip"] = $"{Random.Next(1, 255)}.{Random.Next(0, 255)}.{Random.Next(0, 255)}.{Random.Next(0, 255)}",
+            ["userAgent"] = Random.NextDouble() > 0.5 ? "Chrome" : "Firefox",
             ["page"] = $"/{eventType}"
         };
 
         switch (eventType)
         {
             case "checkout":
-                metadata["amount"] = Math.Round(_random.NextDouble() * 100, 2);
-                metadata["items"] = _random.Next(1, 5);
+                metadata["amount"] = Math.Round(Random.NextDouble() * 100, 2);
+                metadata["items"] = Random.Next(1, 5);
                 break;
             case "search":
-                metadata["query"] = $"search query {_random.Next(1000)}";
+                metadata["query"] = $"search query {Random.Next(1000)}";
                 break;
         }
 

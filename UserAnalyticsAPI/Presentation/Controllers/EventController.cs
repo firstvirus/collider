@@ -9,26 +9,13 @@ using UserAnalyticsAPI.Presentation.DTO.Response;
 namespace UserAnalyticsAPI.Presentation.Controllers;
 
 [ApiController]
-public class EventController : ControllerBase
+public class EventController(
+    MainDbContext mainDbContext,
+    AddEventUseCase addEventUseCase,
+    ListPagedEventsUseCase listPagedEventsUseCase,
+    StatisticUseCase statisticUseCase)
+    : ControllerBase
 {
-    private readonly MainDbContext _mainDbContext;
-    private readonly AddEventUseCase _addEventUseCase;
-    private readonly ListPagedEventsUseCase _listPagedEventsUseCase;
-    private readonly StatisticUseCase _statisticUseCase;
-
-    public EventController (
-        MainDbContext mainDbContext,
-        AddEventUseCase addEventUseCase,
-        ListPagedEventsUseCase listPagedEventsUseCase,
-        StatisticUseCase statisticUseCase
-    )
-    {
-        _mainDbContext = mainDbContext;
-        _addEventUseCase = addEventUseCase;
-        _listPagedEventsUseCase = listPagedEventsUseCase;
-        _statisticUseCase = statisticUseCase;
-    }
-
     [HttpPost("event")]
     public async Task<IActionResult> CreateEvent([FromBody] EventRequestDto dto)
     {
@@ -43,7 +30,7 @@ public class EventController : ControllerBase
 
         try
         {
-            await _addEventUseCase.ExecuteAsync(dto);
+            await addEventUseCase.ExecuteAsync(dto);
         }
         catch (Exception ex)
         {
@@ -61,7 +48,7 @@ public class EventController : ControllerBase
     {
         try
         {
-            return Ok(await _listPagedEventsUseCase.ExecuteAsync(page, count));
+            return Ok(await listPagedEventsUseCase.ExecuteAsync(page, count));
         }
         catch (Exception ex)
         {
@@ -72,7 +59,7 @@ public class EventController : ControllerBase
     [HttpDelete("events")]
     public async Task<IActionResult> DeleteEvents([FromQuery] DateTime before)
     {
-        await _mainDbContext.Events.Where(e => e.Timestamp < before).ExecuteDeleteAsync();
+        await mainDbContext.Events.Where(e => e.Timestamp < before).ExecuteDeleteAsync();
         return NoContent();
     }
 
@@ -80,7 +67,7 @@ public class EventController : ControllerBase
     public async Task<IActionResult> GetEventsByUser(string user_id)
     {
         return Ok(
-            await _mainDbContext.Events
+            await mainDbContext.Events
             .Where(e => e.UserId == Guid.Parse(user_id))
             .OrderByDescending(e => e.Timestamp)
             .Take(1000)
@@ -98,7 +85,7 @@ public class EventController : ControllerBase
         try
         {
             return Ok(
-                await _statisticUseCase.ExecuteAsync(new StatisticRequestDto()
+                await statisticUseCase.ExecuteAsync(new StatisticRequestDto()
                 {
                     From = from,
                     To = to,

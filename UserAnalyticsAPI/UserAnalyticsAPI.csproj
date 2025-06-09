@@ -28,7 +28,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Application\Services\" />
     <Folder Include="Domain\Data\Migrations\" />
     <Folder Include="Domain\UseCases\" />
     <Folder Include="Presentation\Controllers\" />

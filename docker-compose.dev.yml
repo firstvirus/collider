@@ -1,0 +1,57 @@
+services:
+
+  user_analytics_db:
+    image: debezium/postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_INITDB_WAL_LEVEL: logical
+    ports:
+      - ${DB_PORT_HOST}:${DB_PORT}
+    networks:
+      - user_analytics_network
+    restart: on-failure
+    volumes:
+      - pg_user_analytics_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-q", "-d", "${DB_NAME}", "-U", "${DB_USER}" ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    container_name: user_analytics_db
+    labels:
+      - "app=user_analytics"
+
+  user_analytics:
+    build:
+      context: .
+      dockerfile: UserAnalyticsAPI/DockerfileLocal
+      args:
+        BUILD_CONFIGURATION: ${BUILD_CONFIGURATION}
+        ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT}
+        POSTGRES_HOST: ${DB_HOST}
+        POSTGRES_USER: ${DB_USER}
+        POSTGRES_PASSWORD: ${DB_PASSWORD}
+        POSTGRES_DB: ${DB_NAME}
+        POSTGRES_PORT: ${DB_PORT}
+    env_file: config.env
+    platform: linux/amd64
+    ports:
+      - ${WEB_PORT}:${CONTATINER_PORT}
+    depends_on:
+      user_analytics_db:
+        condition: service_healthy
+    networks:
+      - user_analytics_network
+    restart: on-failure
+    container_name: user_analytics
+    labels:
+      - "app=user_analytics"
+
+volumes:
+  pg_user_analytics_data:
+
+networks:
+  user_analytics_network:
+    external: true

@@ -1,4 +1,5 @@
 .vs/
+.idea/
 UserAnalyticsAPI/bin/
 UserAnalyticsAPI/obj/
 UserAnalyticsAPI/*.user
