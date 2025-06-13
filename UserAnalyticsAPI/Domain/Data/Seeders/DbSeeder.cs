@@ -1,7 +1,8 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json;
-using NpgsqlTypes;
 using Npgsql;
+using NpgsqlTypes;
+using System.Diagnostics;
 using UserAnalyticsAPI.Domain.Data.Models;
 
 namespace UserAnalyticsAPI.Domain.Data.Seeders;
@@ -15,9 +16,12 @@ public class DbSeeder(MainDbContext mainDbContext)
 
     public async Task SeedAsync()
     {
+        var stopwatch = Stopwatch.StartNew();
         await SeedUsers(mainDbContext);
         await SeedEventTypes(mainDbContext);
         await SeedEvents(mainDbContext);
+        stopwatch.Stop();
+        Console.WriteLine($"Execution time is: {stopwatch.ElapsedMilliseconds} ms");
     }
 
     private static async Task SeedUsers(MainDbContext context)
@@ -61,20 +65,6 @@ public class DbSeeder(MainDbContext mainDbContext)
         var eventTypes = await context.EventTypes.ToListAsync();
         var events = new List<Event>();
 
-        for (int i = 0; i < 10000000; i++)
-        {
-            var user = users[Random.Next(users.Count)];
-            var eventType = eventTypes[Random.Next(eventTypes.Count)];
-
-            events.Add(new Event
-            {
-                UserId = user.Id,
-                TypeId = eventType.Id,
-                Timestamp = DateTime.UtcNow.AddMinutes(-Random.Next(1, 10080)), // До 7 дней назад
-                Metadata = GenerateRandomMetadata(eventType.Name)
-            });
-        }
-
         await context.Database.ExecuteSqlRawAsync("ALTER TABLE events SET UNLOGGED");
         await context.Database.ExecuteSqlRawAsync("DROP INDEX ix_events_user_id");
         
@@ -87,13 +77,16 @@ public class DbSeeder(MainDbContext mainDbContext)
         await using var writer = await npgsqlConnection.BeginBinaryImportAsync(
             "COPY events (user_id, type_id, timestamp, metadata) FROM STDIN (FORMAT BINARY)");
 
-        foreach (var e in events)
+        for (int i = 0; i < 10000000; i++)
         {
+            var user = users[Random.Next(users.Count)];
+            var eventType = eventTypes[Random.Next(eventTypes.Count)];
+
             await writer.StartRowAsync();
-            await writer.WriteAsync(e.UserId);
-            await writer.WriteAsync(e.TypeId);
-            await writer.WriteAsync(e.Timestamp);
-            await writer.WriteAsync(JsonConvert.SerializeObject(e.Metadata), NpgsqlDbType.Jsonb);
+            await writer.WriteAsync(user.Id);
+            await writer.WriteAsync(eventType.Id);
+            await writer.WriteAsync(DateTime.UtcNow.AddMinutes(-Random.Next(1, 10080)));
+            await writer.WriteAsync(JsonConvert.SerializeObject(GenerateRandomMetadata(eventType.Name)), NpgsqlDbType.Jsonb);
         }
 
         await writer.CompleteAsync();
