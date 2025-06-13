@@ -1,7 +1,10 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using MySqlConnector;
 using Newtonsoft.Json;
 using Npgsql;
-using NpgsqlTypes;
+using Npgsql.Bulk;
+using System.Collections.Concurrent;
+using System.Data;
 using System.Diagnostics;
 using UserAnalyticsAPI.Domain.Data.Models;
 
@@ -61,6 +64,7 @@ public class DbSeeder(MainDbContext mainDbContext)
     {
         if (await context.Events.AnyAsync()) return;
 
+        /*
         var users = await context.Users.ToListAsync();
         var eventTypes = await context.EventTypes.ToListAsync();
         var events = new List<Event>();
@@ -71,9 +75,6 @@ public class DbSeeder(MainDbContext mainDbContext)
         var npgsqlConnection = (NpgsqlConnection)context.Database.GetDbConnection();
         if (npgsqlConnection.State != System.Data.ConnectionState.Open)
             await npgsqlConnection.OpenAsync();
-
-        /*
-
 
         await using var writer = await npgsqlConnection.BeginBinaryImportAsync(
             "COPY events (user_id, type_id, timestamp, metadata) FROM STDIN (FORMAT BINARY)");
@@ -91,28 +92,100 @@ public class DbSeeder(MainDbContext mainDbContext)
         }
 
         await writer.CompleteAsync();
-        await writer.DisposeAsync();*/
-
-        for (int i = 0; i < 200; i++)
-        {
-            Console.WriteLine($"{i} Iteration start");
-            string query = "INSERT INTO events (user_id,type_id,timestamp,metadata) VALUES ";
-            for (int j = 0; j < 50000; j++)
-            {
-                var user = users[Random.Next(users.Count)];
-                var eventType = eventTypes[Random.Next(eventTypes.Count)];
-                query += (j == 0) ? "" : ",";
-                query += $"({user.Id},{eventType.Id},\"{DateTime.UtcNow.AddMinutes(-Random.Next(1, 10080))}\",\"{JsonConvert.SerializeObject(GenerateRandomMetadata(eventType.Name))}\")";
-                Console.WriteLine($"{i}|{j} Iteration query forming.");
-            }
-            Console.WriteLine($"{i} Iteration query formed.");
-            await using var cmd = new NpgsqlCommand(query, npgsqlConnection);
-            await cmd.ExecuteNonQueryAsync();
-            Console.WriteLine($"{i} Iteration query executed.");
-        }
+        await writer.DisposeAsync();
 
         await context.Database.ExecuteSqlRawAsync("CREATE INDEX CONCURRENTLY ix_events_user_id ON events(user_id)");
         await context.Database.ExecuteSqlRawAsync("ALTER TABLE events SET LOGGED");
+        */
+        // 1. Подготовка БД (максимальная производительность)
+        await context.Database.ExecuteSqlRawAsync(@"
+            ALTER TABLE events SET UNLOGGED;
+            DROP INDEX IF EXISTS ix_events_user_id;
+            TRUNCATE TABLE events;
+            ALTER TABLE events DISABLE TRIGGER ALL;
+        ");
+
+        // 2. Загрузка только необходимых данных
+        var userIds = await context.Users.AsNoTracking()
+            .Select(u => u.Id)
+            .ToArrayAsync();
+
+        var eventTypes = await context.EventTypes.AsNoTracking()
+            .Select(et => new { et.Id, et.Name })
+            .ToArrayAsync();
+
+        // 3. Настройка подключения
+        await using var connection = (NpgsqlConnection)context.Database.GetDbConnection();
+        await connection.OpenAsync();
+
+        // 4. Создание DataTable с оптимальной структурой
+        var dataTable = new DataTable();
+        dataTable.Columns.Add("user_id", typeof(Guid));
+        dataTable.Columns.Add("type_id", typeof(int));
+        dataTable.Columns.Add("timestamp", typeof(DateTime));
+        dataTable.Columns.Add("metadata", typeof(string)); // Будет конвертировано в jsonb
+
+        // 5. Подготовка кеша JSON
+        var jsonCache = eventTypes.ToDictionary(
+            et => et.Id,
+            et => JsonConvert.SerializeObject(new { type = et.Name })
+        );
+
+        // 6. Параллельное заполнение DataTable (разбивка на потоки)
+        const int totalRecords = 10_000_000;
+        const int batchSize = 100_000;
+        var random = new Random();
+
+        await Parallel.ForEachAsync(
+            Partitioner.Create(0, totalRecords, batchSize).GetDynamicPartitions(),
+            async (range, ct) =>
+            {
+                /*var localTable = new DataTable();
+                localTable.Columns.Add("user_id", typeof(Guid));
+                localTable.Columns.Add("type_id", typeof(int));
+                localTable.Columns.Add("timestamp", typeof(DateTime));
+                localTable.Columns.Add("metadata", typeof(string));
+
+                for (int i = range.Item1; i < range.Item2; i++)
+                {
+                    var userIdx = random.Next(userIds.Length);
+                    var typeIdx = random.Next(eventTypes.Length);
+                    var eventType = eventTypes[typeIdx];
+
+                    localTable.Rows.Add(
+                        userIds[userIdx],
+                        eventType.Id,
+                        DateTime.UtcNow.AddMinutes(-random.Next(1, 10080)),
+                        jsonCache[eventType.Id]
+                    );
+                }*/
+                List<Event> events = new List<Event>();
+                for (int i = range.Item1; i < range.Item2; i++)
+                {
+                    var userIdx = random.Next(userIds.Length);
+                    var typeIdx = random.Next(eventTypes.Length);
+                    var eventType = eventTypes[typeIdx];
+
+                    events.Add(new Event {
+                        UserId = userIds[userIdx],
+                        TypeId = eventType.Id,
+                        Timestamp = DateTime.UtcNow.AddMinutes(-random.Next(1, 10080)),
+                        Metadata = GenerateRandomMetadata(eventType.Name)
+                    });
+                }
+
+                // 7. Пакетная вставка через NpgsqlBulkUploader
+                var bulkImporter = new NpgsqlBulkUploader(context, true);
+                await bulkImporter.InsertAsync(events);
+            }
+        );
+
+        // 8. Восстановление БД (параллельно)
+        await Task.WhenAll(
+            context.Database.ExecuteSqlRawAsync("ALTER TABLE events SET LOGGED"),
+            context.Database.ExecuteSqlRawAsync("CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_events_user_id ON events(user_id)"),
+            context.Database.ExecuteSqlRawAsync("ALTER TABLE events ENABLE TRIGGER ALL")
+        );
     }
 
     private static Dictionary<string, object> GenerateRandomMetadata(string eventType)
