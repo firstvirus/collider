@@ -69,9 +69,10 @@ public class DbSeeder(MainDbContext mainDbContext)
         await context.Database.ExecuteSqlRawAsync("DROP INDEX ix_events_user_id");
         
         var npgsqlConnection = (NpgsqlConnection)context.Database.GetDbConnection();
-
-        /*if (npgsqlConnection.State != System.Data.ConnectionState.Open)
+        if (npgsqlConnection.State != System.Data.ConnectionState.Open)
             await npgsqlConnection.OpenAsync();
+
+        /*
 
 
         await using var writer = await npgsqlConnection.BeginBinaryImportAsync(
@@ -94,16 +95,20 @@ public class DbSeeder(MainDbContext mainDbContext)
 
         for (int i = 0; i < 200; i++)
         {
+            Console.WriteLine($"{i} Iteration start");
             string query = "INSERT INTO events (user_id,type_id,timestamp,metadata) VALUES ";
             for (int j = 0; j < 50000; j++)
             {
                 var user = users[Random.Next(users.Count)];
                 var eventType = eventTypes[Random.Next(eventTypes.Count)];
                 query += (j == 0) ? "" : ",";
-                query += $"({user.Id},{eventType.Id},{DateTime.UtcNow.AddMinutes(-Random.Next(1, 10080))},{JsonConvert.SerializeObject(GenerateRandomMetadata(eventType.Name))})";
+                query += $"({user.Id},{eventType.Id},\"{DateTime.UtcNow.AddMinutes(-Random.Next(1, 10080))}\",\"{JsonConvert.SerializeObject(GenerateRandomMetadata(eventType.Name))}\")";
+
             }
+            Console.WriteLine($"{i} Iteration query formed.");
             await using var cmd = new NpgsqlCommand(query, npgsqlConnection);
             await cmd.ExecuteNonQueryAsync();
+            Console.WriteLine($"{i} Iteration query executed.");
         }
 
         await context.Database.ExecuteSqlRawAsync("CREATE INDEX CONCURRENTLY ix_events_user_id ON events(user_id)");
