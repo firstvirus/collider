@@ -81,12 +81,17 @@ public class DbSeeder(MainDbContext mainDbContext)
 
         // 3. Параллельное заполнение (разбивка на потоки)
         const int totalRecords = 10_000_000;
-        const int batchSize = 100_000;
         var random = new Random();
-        Console.WriteLine($"Number of cores: {Environment.ProcessorCount}");
+        int maxThreads = Environment.ProcessorCount;
+        Console.WriteLine($"Number of cores: {maxThreads}");
 
         await Parallel.ForEachAsync(
-            Partitioner.Create(0, totalRecords, batchSize).GetDynamicPartitions(),
+            Partitioner.Create(0, totalRecords).GetDynamicPartitions(), // Без batchSize!
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = maxThreads, // Жестко фиксируем потоки
+                TaskScheduler = TaskScheduler.Default
+            },
             async (range, ct) =>
             {
                 Console.WriteLine($"{range.Item1} - {range.Item2} started.");
