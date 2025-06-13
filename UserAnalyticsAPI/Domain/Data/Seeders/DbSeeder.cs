@@ -88,11 +88,13 @@ public class DbSeeder(MainDbContext mainDbContext)
         const int totalRecords = 10_000_000;
         const int batchSize = 100_000;
         var random = new Random();
+        Console.WriteLine($"Number of cores: {Environment.ProcessorCount}");
 
         await Parallel.ForEachAsync(
             Partitioner.Create(0, totalRecords, batchSize).GetDynamicPartitions(),
             async (range, ct) =>
             {
+                Console.WriteLine($"{range.Item2} - {range.Item1} started.");
                 var optionsBuilder = new DbContextOptionsBuilder<MainDbContext>();
                 optionsBuilder.UseNpgsql(connectionString);
                 await using var parallelContext = new MainDbContext(optionsBuilder.Options);
@@ -111,10 +113,11 @@ public class DbSeeder(MainDbContext mainDbContext)
                 // 5. Пакетная вставка через NpgsqlBulkUploader
                 lock (typeof(NpgsqlBulkUploader))
                 {
-                    var bulkImporter = new NpgsqlBulkUploader(context);
+                    var bulkImporter = new NpgsqlBulkUploader(parallelContext);
                     bulkImporter.Insert(events); // Синхронная версия для thread-safety
                 }
                 await transaction.CommitAsync(ct);
+                Console.WriteLine($"{range.Item2} - {range.Item1} finished.");
             }
         );
 
