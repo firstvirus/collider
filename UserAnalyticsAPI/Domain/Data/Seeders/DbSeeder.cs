@@ -112,8 +112,11 @@ public class DbSeeder(MainDbContext mainDbContext)
                 }
 
                 // 5. Пакетная вставка через NpgsqlBulkUploader
-                var bulkImporter = new NpgsqlBulkUploader(parallelContext, true);
-                await bulkImporter.InsertAsync(events);
+                lock (typeof(NpgsqlBulkUploader))
+                {
+                    var bulkImporter = new NpgsqlBulkUploader(context);
+                    bulkImporter.Insert(events); // Синхронная версия для thread-safety
+                }
             }
         );
 
