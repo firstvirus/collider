@@ -94,11 +94,10 @@ public class DbSeeder(MainDbContext mainDbContext)
             Partitioner.Create(0, totalRecords, batchSize).GetDynamicPartitions(),
             async (range, ct) =>
             {
-                Console.WriteLine($"{range.Item2} - {range.Item1} started.");
+                Console.WriteLine($"{range.Item1} - {range.Item2} started.");
                 var optionsBuilder = new DbContextOptionsBuilder<MainDbContext>();
                 optionsBuilder.UseNpgsql(connectionString);
                 await using var parallelContext = new MainDbContext(optionsBuilder.Options);
-                var transaction = await parallelContext.Database.BeginTransactionAsync(ct);
 
                 var events = new Event[range.Item2 - range.Item1];
                 var random = new Random(Environment.TickCount + range.Item1);
@@ -116,17 +115,15 @@ public class DbSeeder(MainDbContext mainDbContext)
                     var bulkImporter = new NpgsqlBulkUploader(parallelContext);
                     bulkImporter.Insert(events); // Синхронная версия для thread-safety
                 }
-                await transaction.CommitAsync(ct);
+                await parallelContext.DisposeAsync();
                 Console.WriteLine($"{range.Item2} - {range.Item1} finished.");
             }
         );
 
         // 6. Восстановление БД (параллельно)
-        await Task.WhenAll(
-            context.Database.ExecuteSqlRawAsync("ALTER TABLE events SET LOGGED"),
-            context.Database.ExecuteSqlRawAsync("CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_events_user_id ON events(user_id)"),
-            context.Database.ExecuteSqlRawAsync("ALTER TABLE events ENABLE TRIGGER ALL")
-        );
+        await context.Database.ExecuteSqlRawAsync("ALTER TABLE events SET LOGGED");
+        await context.Database.ExecuteSqlRawAsync("CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_events_user_id ON events(user_id)");
+        await context.Database.ExecuteSqlRawAsync("ALTER TABLE events ENABLE TRIGGER ALL");
     }
 
     private static Event GenerateEvent(Guid userId, dynamic eventType, Random random)
