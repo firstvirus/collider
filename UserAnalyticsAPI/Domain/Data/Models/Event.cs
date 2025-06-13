@@ -55,12 +55,14 @@ public class Event
     /// <summary>
     /// Пользователь (навигационное свойство)
     /// </summary>
+    [NotMapped]
     [ForeignKey("user_id")]
     public User? User { get; set; }
 
     /// <summary>
     /// Тип события (навигационное свойство)
     /// </summary>
+    [NotMapped]
     [ForeignKey("type_id")]
     public EventType? EventType { get; set; }
 }
