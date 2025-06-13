@@ -82,7 +82,7 @@ public class DbSeeder(MainDbContext mainDbContext)
             .ToArrayAsync();
 
         // 3. Настройка подключения
-        var connectionString = context.Database.GetDbConnection().ConnectionString;
+        var connectionString = context.Database.GetConnectionString();
 
         // 4. Параллельное заполнение DataTable (разбивка на потоки)
         const int totalRecords = 10_000_000;
