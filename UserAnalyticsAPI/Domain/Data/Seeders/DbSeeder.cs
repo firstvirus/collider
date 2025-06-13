@@ -80,9 +80,6 @@ public class DbSeeder(MainDbContext mainDbContext)
             .Select(et => new { et.Id, et.Name })
             .ToArrayAsync();
 
-        // 3. Настройка подключения
-        var connectionString = context.Database.GetConnectionString();
-
         // 4. Параллельное заполнение (разбивка на потоки)
         const int totalRecords = 10_000_000;
         const int batchSize = 100_000;
@@ -94,7 +91,7 @@ public class DbSeeder(MainDbContext mainDbContext)
             async (range, ct) =>
             {
                 Console.WriteLine($"{range.Item1} - {range.Item2} started.");
-                var npgsqlConnection = (NpgsqlConnection)context.Database.GetDbConnection();
+                var npgsqlConnection = new NpgsqlConnection(context.Database.GetConnectionString());// (NpgsqlConnection)context.Database.GetDbConnection();
 
                 if (npgsqlConnection.State != System.Data.ConnectionState.Open)
                     await npgsqlConnection.OpenAsync();
@@ -127,6 +124,8 @@ public class DbSeeder(MainDbContext mainDbContext)
 
                 await writer.CompleteAsync();
                 await writer.DisposeAsync();
+                await npgsqlConnection.CloseAsync();
+                await npgsqlConnection.DisposeAsync();
                 /*
                 // 5. Пакетная вставка через NpgsqlBulkUploader
                 lock (typeof(NpgsqlBulkUploader))
