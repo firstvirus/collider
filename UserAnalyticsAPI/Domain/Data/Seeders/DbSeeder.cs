@@ -96,19 +96,16 @@ public class DbSeeder(MainDbContext mainDbContext)
                 var optionsBuilder = new DbContextOptionsBuilder<MainDbContext>();
                 optionsBuilder.UseNpgsql(connectionString);
                 await using var parallelContext = new MainDbContext(optionsBuilder.Options);
-                List<Event> events = new List<Event>();
-                for (int i = range.Item1; i < range.Item2; i++)
+                var transaction = await parallelContext.Database.BeginTransactionAsync(ct);
+
+                var events = new Event[range.Item2 - range.Item1];
+                var random = new Random(Environment.TickCount + range.Item1);
+
+                for (int i = 0; i < events.Length; i++)
                 {
                     var userIdx = random.Next(userIds.Length);
                     var typeIdx = random.Next(eventTypes.Length);
-                    var eventType = eventTypes[typeIdx];
-
-                    events.Add(new Event {
-                        UserId = userIds[userIdx],
-                        TypeId = eventType.Id,
-                        Timestamp = DateTime.UtcNow.AddMinutes(-random.Next(1, 10080)),
-                        Metadata = GenerateRandomMetadata(eventType.Name)
-                    });
+                    events[i] = GenerateEvent(userIds[userIdx], eventTypes[typeIdx], random);
                 }
 
                 // 5. Пакетная вставка через NpgsqlBulkUploader
@@ -117,6 +114,7 @@ public class DbSeeder(MainDbContext mainDbContext)
                     var bulkImporter = new NpgsqlBulkUploader(context);
                     bulkImporter.Insert(events); // Синхронная версия для thread-safety
                 }
+                await transaction.CommitAsync(ct);
             }
         );
 
@@ -126,6 +124,17 @@ public class DbSeeder(MainDbContext mainDbContext)
             context.Database.ExecuteSqlRawAsync("CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_events_user_id ON events(user_id)"),
             context.Database.ExecuteSqlRawAsync("ALTER TABLE events ENABLE TRIGGER ALL")
         );
+    }
+
+    private static Event GenerateEvent(Guid userId, dynamic eventType, Random random)
+    {
+        return new Event
+        {
+            UserId = userId,
+            TypeId = eventType.Id,
+            Timestamp = DateTime.UtcNow.AddMinutes(-random.Next(1, 10080)),
+            Metadata = new Dictionary<string, object> { ["path"] = "/" + eventType.Name }
+        };
     }
 
     private static Dictionary<string, object> GenerateRandomMetadata(string eventType)
