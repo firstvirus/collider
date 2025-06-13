@@ -103,7 +103,7 @@ public class DbSeeder(MainDbContext mainDbContext)
                 var eventType = eventTypes[Random.Next(eventTypes.Count)];
                 query += (j == 0) ? "" : ",";
                 query += $"({user.Id},{eventType.Id},\"{DateTime.UtcNow.AddMinutes(-Random.Next(1, 10080))}\",\"{JsonConvert.SerializeObject(GenerateRandomMetadata(eventType.Name))}\")";
-
+                Console.WriteLine($"{i}|{j} Iteration query forming.");
             }
             Console.WriteLine($"{i} Iteration query formed.");
             await using var cmd = new NpgsqlCommand(query, npgsqlConnection);
