@@ -1,7 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json;
 using Npgsql;
-using Npgsql.Bulk;
 using NpgsqlTypes;
 using System.Collections.Concurrent;
 using System.Data;
@@ -80,7 +79,7 @@ public class DbSeeder(MainDbContext mainDbContext)
             .Select(et => new { et.Id, et.Name })
             .ToArrayAsync();
 
-        // 4. Параллельное заполнение (разбивка на потоки)
+        // 3. Параллельное заполнение (разбивка на потоки)
         const int totalRecords = 10_000_000;
         const int batchSize = 100_000;
         var random = new Random();
@@ -91,18 +90,13 @@ public class DbSeeder(MainDbContext mainDbContext)
             async (range, ct) =>
             {
                 Console.WriteLine($"{range.Item1} - {range.Item2} started.");
-                var npgsqlConnection = new NpgsqlConnection(context.Database.GetConnectionString());// (NpgsqlConnection)context.Database.GetDbConnection();
+                var npgsqlConnection = new NpgsqlConnection(context.Database.GetConnectionString());
 
                 if (npgsqlConnection.State != System.Data.ConnectionState.Open)
                     await npgsqlConnection.OpenAsync();
 
                 await using var writer = await npgsqlConnection.BeginBinaryImportAsync(
                     "COPY events (user_id, type_id, timestamp, metadata) FROM STDIN (FORMAT BINARY)");
-
-                /*
-                var optionsBuilder = new DbContextOptionsBuilder<MainDbContext>();
-                optionsBuilder.UseNpgsql(connectionString);
-                await using var parallelContext = new MainDbContext(optionsBuilder.Options);*/
 
                 var events = new Event[range.Item2 - range.Item1];
                 var random = new Random(Environment.TickCount + range.Item1);
@@ -111,8 +105,6 @@ public class DbSeeder(MainDbContext mainDbContext)
                 {
                     var userIdx = random.Next(userIds.Length);
                     var typeIdx = random.Next(eventTypes.Length);
-                    //events[i] = GenerateEvent(userIds[userIdx], eventTypes[typeIdx], random);
-                    //var user = users[Random.Next(users.Count)];
                     var eventType = eventTypes[typeIdx];
 
                     await writer.StartRowAsync();
@@ -126,20 +118,11 @@ public class DbSeeder(MainDbContext mainDbContext)
                 await writer.DisposeAsync();
                 await npgsqlConnection.CloseAsync();
                 await npgsqlConnection.DisposeAsync();
-                /*
-                // 5. Пакетная вставка через NpgsqlBulkUploader
-                lock (typeof(NpgsqlBulkUploader))
-                {
-                    var bulkImporter = new NpgsqlBulkUploader(parallelContext);
-                    bulkImporter.Insert(events); // Синхронная версия для thread-safety
-                }
-                await parallelContext.DisposeAsync();*/
                 Console.WriteLine($"{range.Item1} - {range.Item2} finished.");
             }
         );
 
-        // 6. Восстановление БД
-        await context.Database.ExecuteSqlRawAsync("ALTER TABLE events SET LOGGED");
+        // 4. Восстановление БД
         await context.Database.ExecuteSqlRawAsync("CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_events_user_id ON events(user_id)");
         await context.Database.ExecuteSqlRawAsync("ALTER TABLE events ENABLE TRIGGER ALL");
     }

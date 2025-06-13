@@ -15,42 +15,15 @@ public static class DatabaseConfiguration
         string password = Environment.GetEnvironmentVariable("DB_PASSWORD") ?? "postgre";
         string database = Environment.GetEnvironmentVariable("DB_NAME") ?? "postgre";
 
-        string connectionString = "";
-
-        switch (server)
+        string connectionString = $"Host={host};Port={port};Username={username};Password={password};Database={database}";
+        if (string.IsNullOrEmpty(connectionString))
         {
-            case "MySQL":
-                connectionString = $"server={host};port={port};user={username};password={password};database={database};Pooling=true;";
-                if (string.IsNullOrEmpty(connectionString))
-                {
-                    throw new Exception("DB_CONNECTION environment variable is missing");
-                }
-
-                MySqlServerVersion serverVersion = new(new Version(8, 0, 29));
-
-                services.AddDbContext<MainDbContext>(
-                    options => options.UseMySql(
-                        connectionString: connectionString,
-                        serverVersion,
-                        mysqlOptions => mysqlOptions.EnableRetryOnFailure()
-                    )
-                );
-
-                break;
-            case "PostgreSQL":
-                connectionString = $"Host={host};Port={port};Username={username};Password={password};Database={database}";
-                if (string.IsNullOrEmpty(connectionString))
-                {
-                    throw new Exception("DB_CONNECTION environment variable is missing");
-                }
-
-                services.AddDbContext<TContext>(options =>
-                    options.UseNpgsql(connectionString)
-                        .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking));
-                break;
-            default:
-                throw new NotSupportedException("DB_PROVIDER must be MySQL or PostgreSQL");
+            throw new Exception("DB_CONNECTION environment variable is missing");
         }
+
+        services.AddDbContext<TContext>(options =>
+            options.UseNpgsql(connectionString)
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking));
 
         return services;
     }
