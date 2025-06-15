@@ -75,7 +75,7 @@ public class EventController(
         );
     }
 
-    [HttpPost("stats")]
+    [HttpGet("stats")]
     public async Task<IActionResult> Statistic(
         [FromQuery(Name = "from")] DateTime from,
         [FromQuery(Name = "to")] DateTime to,
