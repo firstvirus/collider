@@ -43,12 +43,12 @@ public class EventController(
     [HttpGet("events")]
     public async Task<IActionResult> GetEvents(
         [FromQuery(Name = "page")]  int page,
-        [FromQuery(Name = "count")] int count
+        [FromQuery(Name = "limit")] int limit
     )
     {
         try
         {
-            return Ok(await listPagedEventsUseCase.ExecuteAsync(page, count));
+            return Ok(await listPagedEventsUseCase.ExecuteAsync(page, limit));
         }
         catch (Exception ex)
         {
